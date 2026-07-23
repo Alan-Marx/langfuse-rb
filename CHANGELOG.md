@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-07-23
+
+### Added
+- `Config#valid?` — non-raising predicate that returns `true`/`false` instead of raising `ConfigurationError`
+- `Langfuse.configured?` — module-level convenience method delegating to `configuration.valid?`
+
+### Changed
+- Internal tracing readiness check now uses `configuration.valid?` (full config validation) rather than checking only `public_key`, `secret_key`, and `base_url`
+
 ## [0.10.1] - 2026-05-05
 
 ### Changed

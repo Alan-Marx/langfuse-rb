@@ -614,6 +614,23 @@ Langfuse.client
 # => Raises Langfuse::ConfigurationError: "public_key is required"
 ```
 
+To check validity without raising, use `Config#valid?` or the module-level `Langfuse.configured?`:
+
+```ruby
+Langfuse.configured?          # => false (before configure)
+
+Langfuse.configure do |config|
+  config.public_key = ENV["LANGFUSE_PUBLIC_KEY"]
+  config.secret_key = ENV["LANGFUSE_SECRET_KEY"]
+end
+
+Langfuse.configured?          # => true
+
+# Or directly on a config object:
+config = Langfuse::Config.new
+config.valid?                 # => false (no keys set)
+```
+
 Validation rules:
 
 - `public_key` must be present
