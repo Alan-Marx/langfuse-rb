@@ -455,6 +455,25 @@ RSpec.describe Langfuse::Config do
     end
   end
 
+  describe "#valid?" do
+    let(:config) do
+      described_class.new do |c|
+        c.public_key = "pk_test"
+        c.secret_key = "sk_test"
+      end
+    end
+
+    it "returns true when configuration is valid" do
+      expect(config.valid?).to be true
+    end
+
+    it "returns false without raising when configuration is invalid" do
+      config.public_key = nil
+
+      expect(config.valid?).to be false
+    end
+  end
+
   describe "attribute setters" do
     let(:config) { described_class.new }
 

@@ -101,6 +101,13 @@ module Langfuse
       configuration
     end
 
+    # Returns whether the global configuration is valid
+    #
+    # @return [Boolean] +true+ if the global configuration is valid, +false+ otherwise
+    def configured?
+      configuration.valid?
+    end
+
     # Returns the global singleton client
     #
     # @return [Client] the global client instance
@@ -121,10 +128,8 @@ module Langfuse
     #
     #   OpenTelemetry.tracer_provider = Langfuse.tracer_provider
     def tracer_provider
-      unless tracing_config_ready?
-        raise ConfigurationError,
-              "Langfuse tracing is disabled until public_key, secret_key, and base_url are configured."
-      end
+     
+      raise ConfigurationError, "Langfuse tracing is disabled until the configuration is valid." unless configuration.valid?
 
       OtelSetup.setup(configuration) unless OtelSetup.initialized?
       OtelSetup.tracer_provider
@@ -550,22 +555,12 @@ module Langfuse
     # rubocop:disable Naming/PredicateMethod
     def setup_tracing_if_ready
       return true if OtelSetup.initialized?
-      return false unless tracing_config_ready?
+      return false unless configuration.valid?
 
       OtelSetup.setup(configuration)
       true
     end
     # rubocop:enable Naming/PredicateMethod
-
-    def tracing_config_ready?
-      configured?(configuration.public_key) &&
-        configured?(configuration.secret_key) &&
-        configured?(configuration.base_url)
-    end
-
-    def configured?(value)
-      !value.nil? && !value.empty?
-    end
 
     def warn_tracing_disabled_once
       return if @tracing_disabled_warning_emitted

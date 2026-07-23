@@ -200,6 +200,17 @@ module Langfuse
     end
     # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
+    # Check whether the configuration is valid without raising.
+    #
+    # @return [Boolean] +true+ if valid, +false+ otherwise
+    def valid?
+      validate!
+
+      true
+    rescue Langfuse::ConfigurationError
+      false
+    end
+
     # Normalize stale_ttl value
     #
     # Converts :indefinite to 1000 years in seconds for practical "never expire"

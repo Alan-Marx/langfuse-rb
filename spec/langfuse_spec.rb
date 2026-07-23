@@ -56,6 +56,18 @@ RSpec.describe Langfuse do
     end
   end
 
+  describe ".configured?" do
+    it "returns true when configuration is valid" do
+      expect(described_class.configured?).to be true
+    end
+
+    it "returns false when configuration is invalid" do
+      described_class.reset!
+
+      expect(described_class.configured?).to be false
+    end
+  end
+
   describe ".client" do
     before do
       described_class.configure do |config|
