@@ -34,6 +34,9 @@ Langfuse.configure do |config|
   # Oops, forgot to set keys
 end
 
+Langfuse.configured? 
+# => false 
+
 Langfuse.client
 # => Langfuse::ConfigurationError: public_key is required
 ```
@@ -45,6 +48,9 @@ Langfuse.configure do |config|
   config.public_key = ENV['LANGFUSE_PUBLIC_KEY']
   config.secret_key = ENV['LANGFUSE_SECRET_KEY']
 end
+
+Langfuse.configured?
+# => true
 ```
 
 **Validation checklist:**

@@ -93,6 +93,31 @@ config = Langfuse.configuration
 puts config.cache_ttl  # => 60
 ```
 
+### `Langfuse.configured?`
+
+Returns whether the global configuration is valid without raising.
+
+**Signature:**
+
+```ruby
+Langfuse.configured? # => Boolean
+```
+
+**Returns:** `true` if configuration passes full validation, `false` otherwise
+
+**Example:**
+
+```ruby
+Langfuse.configured? # => false
+
+Langfuse.configure do |config|
+  config.public_key = ENV["LANGFUSE_PUBLIC_KEY"]
+  config.secret_key = ENV["LANGFUSE_SECRET_KEY"]
+end
+
+Langfuse.configured? # => true
+```
+
 ### `Langfuse.reset!`
 
 Reset configuration, caches, and client instance. Primarily for testing.
@@ -121,7 +146,7 @@ Return Langfuse's internal tracer provider so you can explicitly install it as t
 Langfuse.tracer_provider # => OpenTelemetry::SDK::Trace::TracerProvider
 ```
 
-**Raises:** `ConfigurationError` if `public_key`, `secret_key`, or `base_url` are not configured
+**Raises:** `ConfigurationError` if configuration is invalid
 
 `Langfuse.configure` does not call this for you. This is the explicit global-install seam. If you also want another OpenTelemetry backend or custom propagation, that remains application-owned setup.
 
