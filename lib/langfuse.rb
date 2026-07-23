@@ -569,7 +569,7 @@ module Langfuse
         return if @tracing_disabled_warning_emitted
 
         configuration.logger.warn(
-          "Langfuse tracing is disabled until public_key, secret_key, and base_url are configured."
+          "Langfuse tracing is disabled until the configuration is valid."
         )
         @tracing_disabled_warning_emitted = true
       end
