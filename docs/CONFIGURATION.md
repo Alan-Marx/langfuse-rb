@@ -384,9 +384,10 @@ For in-memory RSpec and Minitest recipes, see [TESTING.md](TESTING.md).
 
 - **Type:** Object responding to `add_to_counter`, `record_value`, and `observe_value`, or `nil`
 - **Default:** `nil` (uses OpenTelemetry's no-op reporter)
-- **Description:** Receives operational metrics emitted by OpenTelemetry's `BatchSpanProcessor`
+- **Description:** Receives operational metrics from OpenTelemetry's `BatchSpanProcessor`
+  and OTLP exporter
 
-The reporter uses the complete
+The reporter implements the
 [OpenTelemetry metrics reporter interface](https://github.com/open-telemetry/opentelemetry-ruby/blob/main/sdk/lib/opentelemetry/sdk/trace/export/metrics_reporter.rb):
 
 ```ruby
@@ -402,7 +403,11 @@ warning and does not interrupt span completion or export.
 
 The reporter can run on application threads and the OpenTelemetry export thread. It
 must be thread-safe, fast, and nonblocking. Do not perform HTTP requests or create
-spans from reporter methods. The application owns the reporter lifecycle.
+spans from reporter methods. The application owns the reporter lifecycle, except for
+one optional hook: if the reporter defines `#shutdown`, `Langfuse.shutdown` calls it
+after the tracer provider shuts down, so a reporter that batches asynchronously (a
+DogStatsD client, for example) gets a chance to flush before process exit. A reporter
+without `#shutdown` is unaffected.
 
 This adapter sends the metrics to Datadog through an existing `Datadog::Statsd`
 instance without adding a Datadog dependency to Langfuse:
@@ -425,6 +430,12 @@ class DogStatsdMetricsReporter
     @statsd.gauge(metric, value, tags: tags(labels))
   end
 
+  # Optional: called by Langfuse.shutdown so the final metrics leave the
+  # DogStatsD client's own buffer before process exit.
+  def shutdown
+    @statsd.flush(sync: true)
+  end
+
   private
 
   def tags(labels)
@@ -439,9 +450,10 @@ Langfuse.configure do |config|
 end
 ```
 
-Use one shared DogStatsD client. At application shutdown, call `Langfuse.shutdown`
-before `statsd.close` so the final batch processor metrics can leave the DogStatsD
-client's buffer.
+Use one shared DogStatsD client. A reporter that defines `#shutdown` (as above) gets
+it called automatically from `Langfuse.shutdown`. Without a `#shutdown` method, flush
+the client yourself - call `Langfuse.shutdown` before `statsd.close` so the final
+batch processor metrics can leave the DogStatsD client's buffer.
 
 #### `job_queue` (Experimental)
 
