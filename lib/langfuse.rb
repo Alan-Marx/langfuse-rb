@@ -67,6 +67,7 @@ require_relative "langfuse/prompt_cache_coordinator"
 require_relative "langfuse/cache_warmer"
 require_relative "langfuse/prompt_cache_events"
 require_relative "langfuse/api_client"
+require_relative "langfuse/resilient_metrics_reporter"
 require_relative "langfuse/span_filter"
 require_relative "langfuse/sampling"
 require_relative "langfuse/otel_span_masking"
@@ -192,6 +193,7 @@ module Langfuse
       ExitHook.disable
       client.shutdown if @client
       OtelSetup.shutdown(timeout: timeout)
+      ResilientMetricsReporter.wrap(configuration.metrics_reporter, logger: configuration.logger)&.shutdown
     end
 
     # Force flush all pending traces

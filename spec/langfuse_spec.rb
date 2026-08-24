@@ -275,6 +275,26 @@ RSpec.describe Langfuse do
       expect(Langfuse::OtelSetup).to receive(:shutdown).with(timeout: 10)
       described_class.shutdown(timeout: 10)
     end
+
+    it "shuts down a metrics reporter that implements it" do
+      reporter = double("reporter with shutdown",
+                        add_to_counter: nil, record_value: nil, observe_value: nil, shutdown: nil)
+      described_class.configuration.metrics_reporter = reporter
+
+      described_class.shutdown
+
+      expect(reporter).to have_received(:shutdown)
+    end
+
+    it "does not raise when the metrics reporter has no shutdown method" do
+      reporter = instance_double(
+        OpenTelemetry::SDK::Trace::Export::MetricsReporter,
+        add_to_counter: nil, record_value: nil, observe_value: nil
+      )
+      described_class.configuration.metrics_reporter = reporter
+
+      expect { described_class.shutdown }.not_to raise_error
+    end
   end
 
   describe "disabled telemetry" do
