@@ -215,10 +215,45 @@ RSpec.describe Langfuse::OtelSetup do
       expect(OpenTelemetry::Exporter::OTLP::Exporter).to receive(:new).with(
         endpoint: "https://api.langfuse.test/api/public/otel/v1/traces",
         headers: expected_headers,
-        compression: "gzip"
+        compression: "gzip",
+        metrics_reporter: nil
       ).and_return(exporter)
 
       expect(described_class.send(:build_exporter, config)).to equal(exporter)
+    end
+
+    it "wraps the configured metrics reporter for the OTLP exporter" do
+      config.span_exporter = nil
+      config.metrics_reporter = metrics_reporter
+
+      allow(described_class).to receive(:build_exporter).and_call_original
+      expect(OpenTelemetry::Exporter::OTLP::Exporter).to receive(:new)
+        .with(hash_including(metrics_reporter: instance_of(Langfuse::ResilientMetricsReporter)))
+        .and_return(exporter)
+
+      described_class.send(:build_exporter, config)
+    end
+  end
+
+  describe "OTLP exporter metrics" do
+    before do
+      config.span_exporter = nil
+      config.metrics_reporter = metrics_reporter
+      stub_request(:post, "https://api.langfuse.test/api/public/otel/v1/traces")
+        .to_return(status: 400, body: "")
+    end
+
+    it "reports otlp_exporter.failure and message.compressed_size through the real exporter" do
+      described_class.setup(config)
+      described_class.tracer_provider.tracer(Langfuse::LANGFUSE_TRACER_NAME).start_span("otlp-span").finish
+      described_class.force_flush(timeout: 2)
+
+      expect(metrics_reporter).to have_received(:add_to_counter).with(
+        "otel.otlp_exporter.failure", increment: 1, labels: { "reason" => "400" }
+      )
+      expect(metrics_reporter).to have_received(:record_value).with(
+        "otel.otlp_exporter.message.compressed_size", value: kind_of(Integer), labels: {}
+      )
     end
   end
 

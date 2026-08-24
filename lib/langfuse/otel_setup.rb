@@ -5,6 +5,7 @@ require "opentelemetry/exporter/otlp"
 require "base64"
 require_relative "masking_exporter"
 require_relative "trace_export_guard"
+require_relative "resilient_metrics_reporter"
 
 module Langfuse
   # OpenTelemetry initialization and setup for Langfuse tracing.
@@ -135,7 +136,8 @@ module Langfuse
         OpenTelemetry::Exporter::OTLP::Exporter.new(
           endpoint: "#{config.base_url}/api/public/otel/v1/traces",
           headers: build_headers(config.public_key, config.secret_key),
-          compression: "gzip"
+          compression: "gzip",
+          metrics_reporter: ResilientMetricsReporter.wrap(config.metrics_reporter, logger: config.logger)
         )
       end
 
