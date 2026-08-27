@@ -67,26 +67,4 @@ RSpec.describe Langfuse::ResilientMetricsReporter do
 
     expect(logger).to have_received(:warn).once
   end
-
-  describe "#shutdown" do
-    it "does nothing when the wrapped reporter does not implement shutdown" do
-      expect { wrapped.shutdown }.not_to raise_error
-    end
-
-    it "forwards shutdown when the wrapped reporter implements it" do
-      shuttable = double("reporter with shutdown",
-                         add_to_counter: nil, record_value: nil, observe_value: nil, shutdown: nil)
-
-      described_class.wrap(shuttable, logger: logger).shutdown
-
-      expect(shuttable).to have_received(:shutdown)
-    end
-
-    it "suppresses a failure from the wrapped reporter's shutdown" do
-      shuttable = double("reporter with shutdown", add_to_counter: nil, record_value: nil, observe_value: nil)
-      allow(shuttable).to receive(:shutdown).and_raise("shutdown failed")
-
-      expect { described_class.wrap(shuttable, logger: logger).shutdown }.not_to raise_error
-    end
-  end
 end

@@ -37,12 +37,6 @@ module Langfuse
       end
     end
 
-    def shutdown
-      return unless @reporter.respond_to?(:shutdown)
-
-      safely(:shutdown) { @reporter.shutdown }
-    end
-
     private
 
     def safely(method_name)

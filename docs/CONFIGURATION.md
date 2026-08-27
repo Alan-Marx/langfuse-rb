@@ -403,11 +403,8 @@ warning and does not interrupt span completion or export.
 
 The reporter can run on application threads and the OpenTelemetry export thread. It
 must be thread-safe, fast, and nonblocking. Do not perform HTTP requests or create
-spans from reporter methods. The application owns the reporter lifecycle, except for
-one optional hook: if the reporter defines `#shutdown`, `Langfuse.shutdown` calls it
-after the tracer provider shuts down, so a reporter that batches asynchronously (a
-DogStatsD client, for example) gets a chance to flush before process exit. A reporter
-without `#shutdown` is unaffected.
+spans from reporter methods. The application owns the reporter lifecycle. Langfuse
+does not flush, close, or shut down the reporter.
 
 This adapter sends the metrics to Datadog through an existing `Datadog::Statsd`
 instance without adding a Datadog dependency to Langfuse:
@@ -430,12 +427,6 @@ class DogStatsdMetricsReporter
     @statsd.gauge(metric, value, tags: tags(labels))
   end
 
-  # Optional: called by Langfuse.shutdown so the final metrics leave the
-  # DogStatsD client's own buffer before process exit.
-  def shutdown
-    @statsd.flush(sync: true)
-  end
-
   private
 
   def tags(labels)
@@ -450,10 +441,15 @@ Langfuse.configure do |config|
 end
 ```
 
-Use one shared DogStatsD client. A reporter that defines `#shutdown` (as above) gets
-it called automatically from `Langfuse.shutdown`. Without a `#shutdown` method, flush
-the client yourself - call `Langfuse.shutdown` before `statsd.close` so the final
-batch processor metrics can leave the DogStatsD client's buffer.
+Use one shared DogStatsD client. At application shutdown, call `Langfuse.shutdown`
+first. Then flush and close the client so the final batch processor and OTLP exporter
+metrics can leave the DogStatsD client's buffer:
+
+```ruby
+Langfuse.shutdown
+statsd.flush(sync: true)
+statsd.close
+```
 
 #### `job_queue` (Experimental)
 

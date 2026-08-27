@@ -332,9 +332,9 @@ Use `Langfuse.force_flush` before immediate readback.
 An abrupt termination such as `SIGKILL` cannot flush buffered data.
 
 For tests, inject `config.span_exporter` before tracing starts.
-For batch processor telemetry, provide a fast and thread-safe `config.metrics_reporter`.
-The application controls the reporter lifecycle, except that `Langfuse.shutdown` calls
-an optional `#shutdown` on it, if defined, after the tracer provider shuts down.
+For batch processor and OTLP exporter telemetry, provide a fast and thread-safe
+`config.metrics_reporter`. The application controls the reporter lifecycle. Flush or
+close it after `Langfuse.shutdown` returns.
 Langfuse controls the configured exporter lifecycle.
 See [CONFIGURATION.md](CONFIGURATION.md) and [TESTING.md](TESTING.md).
 
