@@ -46,6 +46,7 @@ RSpec.describe Langfuse::ExperimentRunner do
 
         expect(result).to be_a(Langfuse::ExperimentResult)
         expect(result.name).to eq("my-exp")
+        expect(result.experiment_id).to match(/\A[0-9a-f]{16}\z/)
       end
 
       it "generates run_name from name and timestamp by default" do
@@ -285,7 +286,7 @@ RSpec.describe Langfuse::ExperimentRunner do
         expect(result.dataset_run_url).to be_nil
       end
 
-      it "uses dataset_id from the first successfully linked item" do
+      it "uses dataset_id from the link that establishes the run identity" do
         items = [
           Langfuse::DatasetItemClient.new(
             { "id" => "item-1", "datasetId" => "ds-1",
@@ -299,13 +300,8 @@ RSpec.describe Langfuse::ExperimentRunner do
           )
         ]
 
-        call_count = 0
-        allow(mock_client).to receive(:create_dataset_run_item) do
-          call_count += 1
-          raise StandardError, "link error" if call_count == 1
-
-          { "datasetRunId" => "run-1" }
-        end
+        allow(mock_client).to receive(:create_dataset_run_item)
+          .and_return({ "datasetRunId" => "run-1" })
         allow(mock_client).to receive(:dataset_run_url)
           .with(dataset_id: "ds-1", dataset_run_id: "run-1")
           .and_return("https://example.com/datasets/ds-1/runs/run-1")
@@ -505,7 +501,11 @@ RSpec.describe Langfuse::ExperimentRunner do
         runner.execute
 
         expect(mock_client).to have_received(:create_score).with(
-          hash_including(name: "score", value: 0.9)
+          hash_including(
+            name: "score", value: 0.9,
+            trace_id: a_string_matching(/\A[0-9a-f]{32}\z/),
+            observation_id: a_string_matching(/\A[0-9a-f]{16}\z/)
+          )
         )
       end
 
@@ -843,6 +843,10 @@ RSpec.describe Langfuse::ExperimentRunner do
     end
 
     context "when dataset linking fails" do
+      before do
+        allow(logger).to receive(:warn).and_return(true)
+      end
+
       let(:dataset_item) do
         Langfuse::DatasetItemClient.new(
           { "id" => "item-1", "datasetId" => "ds-1",
@@ -852,16 +856,194 @@ RSpec.describe Langfuse::ExperimentRunner do
       end
 
       it "logs warning and continues" do
+        root_attributes = nil
         allow(mock_client).to receive(:create_dataset_run_item)
           .and_raise(StandardError, "link error")
 
         runner = described_class.new(
-          client: mock_client, name: "test", items: [dataset_item], task: ->(_) { "a" }
+          client: mock_client, name: "test", items: [dataset_item],
+          task: lambda { |_item|
+            root_attributes = OpenTelemetry::Trace.current_span.attributes.dup
+            "a"
+          }
         )
         result = runner.execute
 
         expect(result.item_results.first.success?).to be true
+        expect(result.experiment_id).to match(/\A[0-9a-f]{16}\z/)
+        expect(root_attributes["langfuse.experiment.id"]).to eq(result.experiment_id)
         expect(logger).to have_received(:warn).with(/Dataset run item linking failed/)
+      end
+
+      it "reuses a known dataset run ID after a later link failure" do
+        second_item = Langfuse::DatasetItemClient.new(
+          { "id" => "item-2", "datasetId" => "ds-1",
+            "input" => { "q" => "second" }, "expectedOutput" => "a2" },
+          client: mock_client
+        )
+        call_count = 0
+        allow(mock_client).to receive(:create_dataset_run_item) do
+          call_count += 1
+          raise StandardError, "link error" if call_count == 2
+
+          { "datasetRunId" => "known-run-id" }
+        end
+        experiment_ids = []
+        runner = described_class.new(
+          client: mock_client, name: "test", items: [dataset_item, second_item],
+          task: lambda { |_item|
+            experiment_ids << OpenTelemetry::Trace.current_span.attributes["langfuse.experiment.id"]
+            "a"
+          }
+        )
+
+        result = runner.execute
+
+        expect(experiment_ids).to eq(%w[known-run-id known-run-id])
+        expect(result.experiment_id).to eq("known-run-id")
+        expect(logger).to have_received(:warn).with(/Dataset run item linking failed/)
+      end
+
+      it "keeps the fallback experiment ID after a later link succeeds" do
+        second_item = Langfuse::DatasetItemClient.new(
+          { "id" => "item-2", "datasetId" => "ds-1",
+            "input" => { "q" => "second" }, "expectedOutput" => "a2" },
+          client: mock_client
+        )
+        call_count = 0
+        allow(mock_client).to receive(:create_dataset_run_item) do
+          call_count += 1
+          raise StandardError, "link error" if call_count == 1
+
+          { "datasetRunId" => "later-run-id" }
+        end
+        experiment_ids = []
+        runner = described_class.new(
+          client: mock_client, name: "test", items: [dataset_item, second_item],
+          task: lambda { |_item|
+            experiment_ids << OpenTelemetry::Trace.current_span.attributes["langfuse.experiment.id"]
+            "a"
+          }
+        )
+
+        result = runner.execute
+
+        expect(experiment_ids).to all(eq(result.experiment_id))
+        expect(result.experiment_id).to match(/\A[0-9a-f]{16}\z/)
+        expect(result.dataset_run_id).to be_nil
+        expect(result.dataset_run_url).to be_nil
+        expect(mock_client).to have_received(:create_dataset_run_item).twice
+        expect(mock_client).not_to have_received(:dataset_run_url)
+        expect(logger).to have_received(:warn).with(/Dataset run item linking failed/)
+      end
+    end
+
+    context "with v4 experiment attributes" do
+      it "sets shared identity on local item roots and child observations" do # rubocop:disable RSpec/ExampleLength
+        root_attributes = nil
+        child_attributes = nil
+        items = [{ input: { question: "What?" }, expected_output: false,
+                   metadata: { difficulty: "easy" } }]
+        task = lambda do |_item|
+          root_attributes = OpenTelemetry::Trace.current_span.attributes.dup
+          Langfuse.observe("experiment-child") do |child|
+            child_attributes = child.otel_span.attributes.dup
+          end
+          "answer"
+        end
+
+        result = described_class.new(
+          client: mock_client, name: "quality", items: items, task: task,
+          run_name: "nightly", description: "quality check", metadata: { model: "test" }
+        ).execute
+
+        expected_item_id = Langfuse::ExperimentAttributes.generate_item_id(items.first[:input])
+        expected_shared = {
+          "langfuse.experiment.id" => result.experiment_id,
+          "langfuse.experiment.name" => "nightly",
+          "langfuse.experiment.item.id" => expected_item_id,
+          "langfuse.experiment.item.root_observation_id" => result.item_results.first.observation_id,
+          "langfuse.experiment.metadata.model" => "test",
+          "langfuse.experiment.item.metadata.difficulty" => "easy",
+          "langfuse.environment" => "sdk-experiment"
+        }
+        expect(root_attributes).to include(expected_shared)
+        expect(child_attributes).to include(expected_shared)
+        expect(root_attributes).to include(
+          "langfuse.experiment.description" => "quality check",
+          "langfuse.experiment.item.expected_output" => "false"
+        )
+        expect(child_attributes).not_to include("langfuse.experiment.description")
+        expect(child_attributes).not_to include("langfuse.experiment.item.expected_output")
+      end
+
+      it "uses the managed dataset run and item identifiers" do # rubocop:disable RSpec/ExampleLength
+        root_attributes = nil
+        child_attributes = nil
+        dataset_item = Langfuse::DatasetItemClient.new(
+          { "id" => "item-1", "datasetId" => "dataset-1", "input" => "question",
+            "expectedOutput" => "answer", "metadata" => { "shared" => "item", "item_only" => true } },
+          client: mock_client
+        )
+        allow(mock_client).to receive(:create_dataset_run_item)
+          .and_return({ "datasetRunId" => "dataset-run-1" })
+
+        result = described_class.new(
+          client: mock_client, name: "quality", items: [dataset_item], run_name: "nightly",
+          metadata: { shared: "run", run_only: true },
+          task: lambda { |_item|
+            root_attributes = OpenTelemetry::Trace.current_span.attributes.dup
+            Langfuse.observe("experiment-child") { |child| child_attributes = child.otel_span.attributes.dup }
+            "answer"
+          }
+        ).execute
+
+        expected_shared = {
+          "langfuse.experiment.id" => "dataset-run-1",
+          "langfuse.experiment.dataset.id" => "dataset-1",
+          "langfuse.experiment.item.id" => "item-1",
+          "langfuse.experiment.item.root_observation_id" => result.item_results.first.observation_id
+        }
+        expect(result.experiment_id).to eq("dataset-run-1")
+        expect(root_attributes).to include(expected_shared)
+        expect(child_attributes).to include(expected_shared)
+        expect(root_attributes).to include(
+          "langfuse.observation.metadata.shared" => "run",
+          "langfuse.observation.metadata.item_only" => "true",
+          "langfuse.observation.metadata.run_only" => "true",
+          "langfuse.observation.metadata.experiment_name" => "quality",
+          "langfuse.observation.metadata.experiment_run_name" => "nightly",
+          "langfuse.observation.metadata.dataset_id" => "dataset-1",
+          "langfuse.observation.metadata.dataset_item_id" => "item-1"
+        )
+      end
+
+      it "does not leak experiment context between concurrent runs" do
+        ready = Queue.new
+        release = Queue.new
+        captured = Queue.new
+        threads = %w[first second].map do |run_name|
+          Thread.new do
+            runner = described_class.new(
+              client: mock_client, name: "quality", items: [{ input: run_name }], run_name: run_name,
+              task: lambda { |_item|
+                ready << true
+                release.pop
+                Langfuse.observe("child") do |child|
+                  captured << [run_name, child.otel_span.attributes["langfuse.experiment.name"]]
+                end
+                "answer"
+              }
+            )
+            runner.execute
+          end
+        end
+
+        2.times { ready.pop }
+        2.times { release << true }
+        threads.each(&:join)
+
+        expect(2.times.map { captured.pop }).to contain_exactly(%w[first first], %w[second second])
       end
     end
   end
